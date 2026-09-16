@@ -4243,9 +4243,8 @@ OSStatus ProxyAudioDevice::GetControlPropertyData(AudioServerPlugInDriverRef inD
                         }
                     }
 
-                    //    Note that we square the scalar value before converting to dB so as to
-                    //    provide a better curve for the slider
-                    *((Float32 *)outData) *= *((Float32 *)outData);
+                    //    Patched: plain linear-in-dB mapping, no extra curve applied here.
+                    //    calculateVolumeFactors() is solely responsible for the audible taper.
                     *((Float32 *)outData) = kVolume_MinDB + (*((Float32 *)outData) * (kVolume_MaxDB - kVolume_MinDB));
 
                     //    report how much we wrote
@@ -4280,9 +4279,8 @@ OSStatus ProxyAudioDevice::GetControlPropertyData(AudioServerPlugInDriverRef inD
                         *((Float32 *)outData) = 1.0;
                     }
 
-                    //    Note that we square the scalar value before converting to dB so as to
-                    //    provide a better curve for the slider
-                    *((Float32 *)outData) *= *((Float32 *)outData);
+                    //    Patched: plain linear-in-dB mapping, no extra curve applied here.
+                    //    calculateVolumeFactors() is solely responsible for the audible taper.
                     *((Float32 *)outData) = kVolume_MinDB + (*((Float32 *)outData) * (kVolume_MaxDB - kVolume_MinDB));
 
                     //    report how much we wrote
@@ -4305,11 +4303,9 @@ OSStatus ProxyAudioDevice::GetControlPropertyData(AudioServerPlugInDriverRef inD
                         *((Float32 *)outData) = kVolume_MaxDB;
                     }
 
-                    //    Note that we square the scalar value before converting to dB so as to
-                    //    provide a better curve for the slider. We undo that here.
+                    //    Patched: plain linear-in-dB mapping, no extra curve applied here.
                     *((Float32 *)outData) = *((Float32 *)outData) - kVolume_MinDB;
                     *((Float32 *)outData) /= kVolume_MaxDB - kVolume_MinDB;
-                    *((Float32 *)outData) = sqrtf(*((Float32 *)outData));
 
                     //    report how much we wrote
                     *outDataSize = sizeof(Float32);
@@ -4581,11 +4577,9 @@ OSStatus ProxyAudioDevice::SetControlPropertyData(AudioServerPlugInDriverRef inD
                     } else if (theNewVolume > kVolume_MaxDB) {
                         theNewVolume = kVolume_MaxDB;
                     }
-                    //    Note that we square the scalar value before converting to dB so as to
-                    //    provide a better curve for the slider. We undo that here.
+                    //    Patched: plain linear-in-dB mapping, no extra curve applied here.
                     theNewVolume = theNewVolume - kVolume_MinDB;
                     theNewVolume /= kVolume_MaxDB - kVolume_MinDB;
-                    theNewVolume = sqrtf(theNewVolume);
                     {
                         CAMutex::Locker locker(stateMutex);
                         if (inObjectID == kObjectID_Volume_Output_L) {
@@ -5453,20 +5447,25 @@ void ProxyAudioDevice::calculateVolumeFactors(Float32 volumeL,
                                               bool mute,
                                               Float32 &volumeFactorL,
                                               Float32 &volumeFactorR) {
-    if (volumeL <= 0.0 || mute) {
+    // Patched: single linear-in-dB curve, correct amplitude exponent (dB/20,
+    // not the original dB/10 power-ratio bug), matched to the same range
+    // used by the (now de-squared) scalar<->dB conversion functions above,
+    // so there is exactly one curve applied end to end instead of two or
+    // three compounding ones.
+    if (mute || volumeL <= 0.0) {
         volumeFactorL = 0.0;
     } else if (volumeL >= 1.0) {
         volumeFactorL = 1.0;
     } else {
-        volumeFactorL = pow(10, (volumeL * (kVolume_MaxDB - kVolume_MinDB) + kVolume_MinDB) / 10);
+        volumeFactorL = pow(10, (volumeL * (kVolume_MaxDB - kVolume_MinDB) + kVolume_MinDB) / 20);
     }
 
-    if (volumeR <= 0.0 || mute) {
+    if (mute || volumeR <= 0.0) {
         volumeFactorR = 0.0;
     } else if (volumeR >= 1.0) {
         volumeFactorR = 1.0;
     } else {
-        volumeFactorR = pow(10, (volumeR * (kVolume_MaxDB - kVolume_MinDB) + kVolume_MinDB) / 10);
+        volumeFactorR = pow(10, (volumeR * (kVolume_MaxDB - kVolume_MinDB) + kVolume_MinDB) / 20);
     }
 }
 
